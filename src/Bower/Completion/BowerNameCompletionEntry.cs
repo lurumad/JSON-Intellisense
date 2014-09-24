@@ -1,5 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Caching;
 using System.Threading;
 using System.Web;
 using EnvDTE80;
@@ -43,19 +45,33 @@ namespace JSON_Intellisense.Bower
         {
             ThreadPool.QueueUserWorkItem(o =>
             {
-                string url = string.Format(Constants.SearchUrl, HttpUtility.UrlEncode(searchTerm));
-                string result = Helper.DownloadText(url);
-                var children = GetChildren(result);
+                var searchTermEncode = HttpUtility.UrlEncode(searchTerm);
+                var key = String.Format("{0}:{1}", GetType().Name, searchTermEncode);
+                ObjectCache cache = MemoryCache.Default;
+                var bowerPackagesFromMemory = cache.Get(key) as IEnumerable<string>;
 
-                if (!children.Any())
+                if (bowerPackagesFromMemory != null)
                 {
-                    _dte.StatusBar.Text = "No packages found matching '" + searchTerm + "'";
-                    base.Session.Dismiss();
-                    return;
+                    _searchResults = bowerPackagesFromMemory;
                 }
+                else
+                {
+                    string url = string.Format(Constants.SearchUrl, searchTermEncode);
+                    string result = Helper.DownloadText(url);
+                    var children = GetChildren(result);
 
-                _dte.StatusBar.Text = string.Empty;
-                _searchResults = children;
+                    if (!children.Any())
+                    {
+                        _dte.StatusBar.Text = "No packages found matching '" + searchTerm + "'";
+                        base.Session.Dismiss();
+                        return;
+                    }
+
+                    _dte.StatusBar.Text = string.Empty;
+                    _searchResults = children;
+                    var cachePolicy = new CacheItemPolicy();
+                    cache.Set(key, _searchResults, cachePolicy);
+                }
 
                 Helper.ExecuteCommand(_dte, "Edit.CompleteWord");
             });
